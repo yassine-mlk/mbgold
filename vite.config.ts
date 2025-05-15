@@ -19,4 +19,15 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  optimizeDeps: {
+    include: ['heic2any']
+  },
+  build: {
+    commonjsOptions: {
+      include: [/heic2any/, /node_modules/]
+    },
+    rollupOptions: {
+      external: [],
+    }
+  }
 }));

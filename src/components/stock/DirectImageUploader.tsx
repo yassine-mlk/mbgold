@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Upload, Loader2, X, AlertTriangle, Camera } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import heic2any from 'heic2any';
+import { convertHeicFileToJpeg, isHeicFile } from '@/utils/heicConverter';
 
 interface DirectImageUploaderProps {
   productId?: string;
@@ -46,24 +46,15 @@ const DirectImageUploader: React.FC<DirectImageUploaderProps> = ({
   // Fonction pour convertir HEIC en JPEG si nécessaire
   const convertHeicToJpeg = async (file: File): Promise<File> => {
     // Vérifier si le fichier est au format HEIC ou HEIF
-    if (file.type === 'image/heic' || file.type === 'image/heif' || 
-        file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif')) {
+    if (isHeicFile(file)) {
       try {
         console.log("Conversion de l'image HEIC en JPEG...");
         setUploadError("Conversion de l'image HEIC en JPEG...");
         
-        // Convertir le fichier HEIC en JPEG
-        const jpegBlob = await heic2any({
-          blob: file,
-          toType: 'image/jpeg',
-          quality: 0.8
-        }) as Blob;
+        // Convertir le fichier HEIC en JPEG avec notre utilitaire
+        const jpegFile = await convertHeicFileToJpeg(file);
         
-        // Créer un nouveau fichier avec l'extension .jpg
-        const fileName = file.name.replace(/\.(heic|heif)$/i, '.jpg');
-        const jpegFile = new File([jpegBlob], fileName, { type: 'image/jpeg' });
-        
-        console.log("Conversion réussie :", fileName);
+        console.log("Conversion réussie :", jpegFile.name);
         setUploadError(null);
         return jpegFile;
       } catch (error) {
