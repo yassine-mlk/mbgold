@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { Printer, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import Barcode from 'react-barcode';
 
 interface BarcodeDisplayProps {
   barcode: string;
@@ -12,8 +13,8 @@ interface BarcodeDisplayProps {
 }
 
 /**
- * Composant pour afficher un code-barres EAN-13 imprimable
- * Dans un environnement de production, il faudrait utiliser une vraie librairie de rendu de codes-barres
+ * Composant pour afficher un code-barres Code128 imprimable
+ * Utilise react-barcode basé sur JsBarcode pour un rendu de haute qualité
  */
 const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, price, weight, category }) => {
   const barcodeRef = useRef<HTMLDivElement>(null);
@@ -47,12 +48,6 @@ const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, p
               border-radius: 5px;
               margin: 10px;
             }
-            .barcode {
-              font-family: 'Libre Barcode EAN13 Text', cursive;
-              font-size: 60px;
-              line-height: 1.2;
-              margin-bottom: 2px;
-            }
             .category-info {
               font-size: 14px;
               font-weight: bold;
@@ -62,11 +57,6 @@ const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, p
               font-size: 14px;
               margin-bottom: 5px;
               font-weight: bold;
-            }
-            .barcode-number {
-              font-family: monospace;
-              font-size: 12px;
-              margin-top: 2px;
             }
             @media print {
               .barcode-container {
@@ -80,17 +70,25 @@ const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, p
               }
             }
           </style>
-          <link href="https://fonts.googleapis.com/css2?family=Libre+Barcode+EAN13+Text&display=swap" rel="stylesheet">
         </head>
         <body>
           <div class="barcode-container">
             ${category ? `<div class="category-info">${category}</div>` : ''}
             ${weight ? `<div class="weight-info">${weight} g</div>` : ''}
-            <div class="barcode">${barcode}</div>
-            <div class="barcode-number">${barcode}</div>
+            <div id="barcode-element"></div>
           </div>
+          <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
           <script>
             window.onload = function() {
+              JsBarcode("#barcode-element", "${barcode}", {
+                format: "CODE128",
+                width: 1.5,
+                height: 40,
+                displayValue: true,
+                fontSize: 12,
+                margin: 5
+              });
+              
               setTimeout(function() {
                 window.print();
                 // window.close();
@@ -120,31 +118,18 @@ const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, p
       </CardHeader>
       <CardContent>
         <div ref={barcodeRef} className="flex flex-col items-center">
-          {/* 
-            Ceci est juste une représentation visuelle.
-            Dans un environnement réel, vous utiliseriez une bibliothèque 
-            comme react-barcode ou JsBarcode pour générer le vrai code-barres.
-          */}
-          <div className="border border-dashed border-gray-300 rounded-md p-4 w-full text-center">
+          <div className="w-full text-center">
             {category && <div className="text-xs text-gray-400 italic mb-1">{category}</div>}
             {weight && <div className="text-xs font-medium mb-1">Poids: {weight} g</div>}
-            <div className="font-mono text-lg font-bold tracking-wider mb-1">
-              {barcode.split('').join(' ')}
-            </div>
-            <div className="border-t border-b border-black py-3 my-2 flex justify-center">
-              {/* Pseudo représentation graphique d'un code-barres */}
-              {barcode.split('').map((digit, i) => (
-                <div 
-                  key={i} 
-                  className="inline-block w-1 mx-px" 
-                  style={{ 
-                    height: `${20 + parseInt(digit) * 2}px`,
-                    backgroundColor: 'black'
-                  }}
-                />
-              ))}
-            </div>
-            <div className="text-xs font-mono">{barcode}</div>
+            <Barcode 
+              value={barcode}
+              format="CODE128"
+              width={1.5}
+              height={40}
+              fontSize={12}
+              margin={5}
+              displayValue={true}
+            />
           </div>
         </div>
       </CardContent>
