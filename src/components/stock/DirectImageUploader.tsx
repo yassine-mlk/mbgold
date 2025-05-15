@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Upload, Loader2, X, AlertTriangle, Camera } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import { convertHeicFileToJpeg, isHeicFile } from '@/utils/heicConverter';
+import { isHeicFile } from '@/utils/heicConverter';
 
 interface DirectImageUploaderProps {
   productId?: string;
@@ -43,29 +43,24 @@ const DirectImageUploader: React.FC<DirectImageUploaderProps> = ({
     }
   };
 
-  // Fonction pour convertir HEIC en JPEG si nécessaire
-  const convertHeicToJpeg = async (file: File): Promise<File> => {
+  // Vérifier le format du fichier avant l'upload
+  const validateFileFormat = (file: File): boolean => {
     // Vérifier si le fichier est au format HEIC ou HEIF
     if (isHeicFile(file)) {
-      try {
-        console.log("Conversion de l'image HEIC en JPEG...");
-        setUploadError("Conversion de l'image HEIC en JPEG...");
-        
-        // Convertir le fichier HEIC en JPEG avec notre utilitaire
-        const jpegFile = await convertHeicFileToJpeg(file);
-        
-        console.log("Conversion réussie :", jpegFile.name);
-        setUploadError(null);
-        return jpegFile;
-      } catch (error) {
-        console.error("Erreur lors de la conversion HEIC → JPEG:", error);
-        setUploadError("Erreur lors de la conversion de l'image HEIC. Veuillez réessayer avec une image JPEG ou PNG.");
-        throw error;
-      }
+      console.warn("Format HEIC/HEIF détecté mais non supporté");
+      setUploadError("Le format HEIC/HEIF n'est pas pris en charge. Veuillez convertir votre image en JPEG ou PNG avant de l'envoyer.");
+      return false;
     }
     
-    // Si ce n'est pas un fichier HEIC, retourner le fichier original
-    return file;
+    // Vérifier si le format est supporté
+    const supportedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    if (!supportedTypes.includes(file.type)) {
+      console.warn(`Format non supporté: ${file.type}`);
+      setUploadError(`Le format d'image "${file.type}" n'est pas pris en charge. Formats acceptés: JPEG, PNG, GIF, WEBP.`);
+      return false;
+    }
+    
+    return true;
   };
 
   // Upload direct vers Supabase sans passer par les services
@@ -139,19 +134,21 @@ const DirectImageUploader: React.FC<DirectImageUploaderProps> = ({
 
   // Fonction pour gérer l'upload d'un fichier
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const originalFile = event.target.files?.[0];
-    if (!originalFile) return;
+    const file = event.target.files?.[0];
+    if (!file) return;
 
     let localPreviewUrl: string | null = null;
     setIsUploading(true);
     setUploadError(null);
 
     try {
-      console.log("Début de l'upload d'image:", originalFile.name, "Taille:", originalFile.size, "Type:", originalFile.type);
+      console.log("Début de l'upload d'image:", file.name, "Taille:", file.size, "Type:", file.type);
       
-      // Convertir HEIC en JPEG si nécessaire
-      const file = await convertHeicToJpeg(originalFile);
-      console.log("Après conversion:", file.name, "Taille:", file.size, "Type:", file.type);
+      // Vérifier si le format du fichier est supporté
+      if (!validateFileFormat(file)) {
+        setIsUploading(false);
+        return;
+      }
       
       // Afficher un aperçu local de l'image avant l'upload
       localPreviewUrl = URL.createObjectURL(file);

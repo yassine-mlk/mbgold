@@ -1,43 +1,7 @@
 /**
- * Utilitaire pour convertir les images HEIC/HEIF en JPEG
- * Utilise l'import dynamique pour éviter les problèmes de build
+ * Utilitaire simplifié pour la gestion des images
+ * Ne contient pas de fonctionnalité de conversion HEIC, mais vérifie le format
  */
-
-interface HeicConversionOptions {
-  blob: Blob;
-  toType?: string;
-  quality?: number;
-}
-
-/**
- * Convertit une image HEIC/HEIF en un autre format (par défaut JPEG)
- * @param options Options de conversion (blob source, format cible, qualité)
- * @returns Promise avec le Blob converti
- */
-export async function convertHeicToAnotherFormat(options: HeicConversionOptions): Promise<Blob> {
-  try {
-    // Import dynamique de heic2any
-    const heic2any = (await import('heic2any')).default;
-    
-    // Options par défaut
-    const conversionOptions = {
-      toType: options.toType || 'image/jpeg',
-      quality: options.quality ?? 0.8
-    };
-    
-    // Convertir l'image
-    const result = await heic2any({
-      blob: options.blob,
-      ...conversionOptions
-    });
-    
-    // heic2any peut retourner un tableau de blobs ou un seul blob
-    return Array.isArray(result) ? result[0] : result;
-  } catch (error) {
-    console.error("Erreur lors de la conversion HEIC:", error);
-    throw new Error("Impossible de convertir l'image HEIC. Veuillez utiliser une image JPEG ou PNG.");
-  }
-}
 
 /**
  * Vérifie si un fichier est au format HEIC/HEIF
@@ -54,27 +18,17 @@ export function isHeicFile(file: File): boolean {
 }
 
 /**
- * Convertit un fichier HEIC/HEIF en JPEG
- * @param file Fichier HEIC/HEIF à convertir
- * @returns Promise avec un objet File au format JPEG
+ * Version simplifiée qui ne convertit pas les fichiers HEIC/HEIF
+ * mais retourne simplement le fichier original avec un avertissement
+ * @param file Fichier à vérifier
+ * @returns Le fichier original
  */
 export async function convertHeicFileToJpeg(file: File): Promise<File> {
-  if (!isHeicFile(file)) {
-    return file; // Retourner le fichier original s'il n'est pas au format HEIC/HEIF
+  if (isHeicFile(file)) {
+    console.warn("Format HEIC/HEIF détecté. Cette application ne prend pas en charge la conversion automatique de ce format. Veuillez utiliser une image JPEG ou PNG.");
+    throw new Error("Le format HEIC/HEIF n'est pas pris en charge. Veuillez convertir votre image en JPEG ou PNG avant de l'envoyer.");
   }
   
-  try {
-    const jpegBlob = await convertHeicToAnotherFormat({
-      blob: file,
-      toType: 'image/jpeg',
-      quality: 0.8
-    });
-    
-    // Créer un nouveau fichier avec l'extension .jpg
-    const fileName = file.name.replace(/\.(heic|heif)$/i, '.jpg');
-    return new File([jpegBlob], fileName, { type: 'image/jpeg' });
-  } catch (error) {
-    console.error("Erreur lors de la conversion HEIC → JPEG:", error);
-    throw error;
-  }
+  // Retourner le fichier original s'il n'est pas au format HEIC/HEIF
+  return file;
 } 
