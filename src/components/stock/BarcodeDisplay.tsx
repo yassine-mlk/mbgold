@@ -7,13 +7,15 @@ interface BarcodeDisplayProps {
   barcode: string;
   productName: string;
   price?: number;
+  weight?: number;
+  category?: string;
 }
 
 /**
  * Composant pour afficher un code-barres EAN-13 imprimable
  * Dans un environnement de production, il faudrait utiliser une vraie librairie de rendu de codes-barres
  */
-const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, price }) => {
+const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, price, weight, category }) => {
   const barcodeRef = useRef<HTMLDivElement>(null);
 
   // Fonction pour simuler l'impression du code-barres
@@ -30,34 +32,41 @@ const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, p
     printWindow.document.write(`
       <html>
         <head>
-          <title>Imprimer Code-Barres: ${productName}</title>
+          <title>Imprimer Code-Barres</title>
           <style>
             body { 
               font-family: Arial, sans-serif;
               margin: 0;
-              padding: 20px;
+              padding: 10px;
               text-align: center;
             }
             .barcode-container {
               display: inline-block;
-              padding: 10px;
+              padding: 5px;
               border: 1px solid #ccc;
               border-radius: 5px;
-              margin: 20px;
+              margin: 10px;
             }
             .barcode {
               font-family: 'Libre Barcode EAN13 Text', cursive;
               font-size: 60px;
               line-height: 1.2;
-              margin-bottom: 5px;
+              margin-bottom: 2px;
             }
-            .product-info {
-              font-size: 12px;
+            .category-info {
+              font-size: 14px;
+              font-weight: bold;
+              margin-bottom: 3px;
+            }
+            .weight-info {
+              font-size: 14px;
               margin-bottom: 5px;
+              font-weight: bold;
             }
             .barcode-number {
               font-family: monospace;
               font-size: 12px;
+              margin-top: 2px;
             }
             @media print {
               .barcode-container {
@@ -75,8 +84,8 @@ const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, p
         </head>
         <body>
           <div class="barcode-container">
-            <div class="product-info">${productName}</div>
-            ${price ? `<div class="product-info">${price.toFixed(2)} DH</div>` : ''}
+            ${category ? `<div class="category-info">${category}</div>` : ''}
+            ${weight ? `<div class="weight-info">${weight} g</div>` : ''}
             <div class="barcode">${barcode}</div>
             <div class="barcode-number">${barcode}</div>
           </div>
@@ -105,8 +114,8 @@ const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, p
       <CardHeader>
         <CardTitle>Code-Barres Produit</CardTitle>
         <CardDescription>
-          {productName}
-          {price && ` - ${price.toFixed(2)} DH`}
+          {category && `Catégorie: ${category}`}
+          {weight && `${category ? ' - ' : ''}Poids: ${weight} g`}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -117,7 +126,8 @@ const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, p
             comme react-barcode ou JsBarcode pour générer le vrai code-barres.
           */}
           <div className="border border-dashed border-gray-300 rounded-md p-4 w-full text-center">
-            <div className="text-xs text-gray-500 mb-1">{productName}</div>
+            {category && <div className="text-xs text-gray-400 italic mb-1">{category}</div>}
+            {weight && <div className="text-xs font-medium mb-1">Poids: {weight} g</div>}
             <div className="font-mono text-lg font-bold tracking-wider mb-1">
               {barcode.split('').join(' ')}
             </div>
@@ -140,11 +150,11 @@ const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, p
       </CardContent>
       <CardFooter className="flex justify-between">
         <Button variant="outline" onClick={printBarcode}>
-          <Printer className="h-4 w-4 mr-2" />
+          <Printer className="mr-2 h-4 w-4" />
           Imprimer
         </Button>
         <Button variant="outline" onClick={downloadBarcode}>
-          <Download className="h-4 w-4 mr-2" />
+          <Download className="mr-2 h-4 w-4" />
           Télécharger
         </Button>
       </CardFooter>
