@@ -13,8 +13,7 @@ interface BarcodeDisplayProps {
 }
 
 /**
- * Composant pour afficher un code-barres Code128 imprimable
- * Utilise react-barcode basé sur JsBarcode pour un rendu de haute qualité
+ * Composant pour afficher un code-barres Code 128 imprimable
  */
 const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, price, weight, category }) => {
   const barcodeRef = useRef<HTMLDivElement>(null);
@@ -69,26 +68,36 @@ const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, p
                 margin: 5mm;
               }
             }
+            svg {
+              max-width: 100%;
+              height: auto;
+            }
           </style>
         </head>
         <body>
           <div class="barcode-container">
             ${category ? `<div class="category-info">${category}</div>` : ''}
             ${weight ? `<div class="weight-info">${weight} g</div>` : ''}
-            <div id="barcode-element"></div>
+            <div id="barcode-container"></div>
           </div>
-          <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+          <script src="https://unpkg.com/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
           <script>
             window.onload = function() {
-              JsBarcode("#barcode-element", "${barcode}", {
+              // Créer l'élément SVG
+              var svgElement = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+              document.getElementById('barcode-container').appendChild(svgElement);
+              
+              // Générer le code-barres
+              JsBarcode(svgElement, "${barcode}", {
                 format: "CODE128",
-                width: 1.5,
-                height: 40,
+                width: 2,
+                height: 50,
                 displayValue: true,
                 fontSize: 12,
                 margin: 5
               });
               
+              // Imprimer après chargement
               setTimeout(function() {
                 window.print();
                 // window.close();
@@ -118,14 +127,14 @@ const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, p
       </CardHeader>
       <CardContent>
         <div ref={barcodeRef} className="flex flex-col items-center">
-          <div className="w-full text-center">
+          <div className="border border-dashed border-gray-300 rounded-md p-4 w-full text-center">
             {category && <div className="text-xs text-gray-400 italic mb-1">{category}</div>}
             {weight && <div className="text-xs font-medium mb-1">Poids: {weight} g</div>}
             <Barcode 
-              value={barcode}
+              value={barcode} 
               format="CODE128"
-              width={1.5}
-              height={40}
+              width={2}
+              height={50}
               fontSize={12}
               margin={5}
               displayValue={true}
