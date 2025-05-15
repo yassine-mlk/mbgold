@@ -607,7 +607,7 @@ export const isBarCodeUnique = async (barcode: string): Promise<boolean> => {
 };
 
 /**
- * Génère un code-barres EAN-13 unique
+ * Génère un code-barres alphanumérique unique au format Code 128
  */
 export const generateUniqueBarcode = async (): Promise<string> => {
   let isUnique = false;
@@ -615,19 +615,10 @@ export const generateUniqueBarcode = async (): Promise<string> => {
   
   // Essaie jusqu'à 10 fois de générer un code-barres unique
   for (let attempt = 0; attempt < 10; attempt++) {
-    // Préfixe pour le Maroc (611) + 9 chiffres aléatoires
-    const prefix = '611';
-    const randomDigits = Math.floor(Math.random() * 1000000000).toString().padStart(9, '0');
-    const barcodeWithoutChecksum = prefix + randomDigits;
-    
-    // Calcul de la clé de contrôle (algorithme EAN-13)
-    let sum = 0;
-    for (let i = 0; i < 12; i++) {
-      sum += parseInt(barcodeWithoutChecksum[i]) * (i % 2 === 0 ? 1 : 3);
-    }
-    const checkDigit = (10 - (sum % 10)) % 10;
-    
-    barcode = barcodeWithoutChecksum + checkDigit;
+    // Utiliser un format alphanumérique: RF suivi de 5 chiffres
+    const prefix = 'RF';
+    const randomNumber = Math.floor(Math.random() * 100000).toString().padStart(5, '0');
+    barcode = `${prefix}${randomNumber}`;
     
     // Vérifier si ce code-barres est unique
     isUnique = await isBarCodeUnique(barcode);

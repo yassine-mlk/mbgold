@@ -74,19 +74,10 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
   
   // Générer un code-barres unique
   const generateUniqueBarcode = () => {
-    // Préfixe pour le Maroc (611) + 9 chiffres aléatoires
-    const prefix = '611';
-    const randomDigits = Math.floor(Math.random() * 1000000000).toString().padStart(9, '0');
-    const barcode = prefix + randomDigits;
-    
-    // Calcul de la clé de contrôle (algorithme EAN-13)
-    let sum = 0;
-    for (let i = 0; i < 12; i++) {
-      sum += parseInt(barcode[i]) * (i % 2 === 0 ? 1 : 3);
-    }
-    const checkDigit = (10 - (sum % 10)) % 10;
-    
-    return barcode + checkDigit;
+    // Format alphanumérique (RF + 5 chiffres)
+    const prefix = 'RF';
+    const randomNumber = Math.floor(Math.random() * 100000).toString().padStart(5, '0');
+    return `${prefix}${randomNumber}`;
   };
 
   const form = useForm<ProduitForm>({

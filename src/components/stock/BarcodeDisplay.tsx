@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import Barcode from 'react-barcode';
 
 interface BarcodeDisplayProps {
-  barcode: string;
+  barcode: string; // Code-barres qui peut être numérique ou alphanumérique (ex: "RF00243")
   productName: string;
   price?: number;
   weight?: number;
@@ -14,6 +14,7 @@ interface BarcodeDisplayProps {
 
 /**
  * Composant pour afficher un code-barres Code 128 imprimable
+ * Le format Code 128 permet d'encoder des codes alphanumériques (lettres, chiffres et symboles)
  */
 const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, price, weight, category }) => {
   const barcodeRef = useRef<HTMLDivElement>(null);
@@ -87,7 +88,7 @@ const BarcodeDisplay: React.FC<BarcodeDisplayProps> = ({ barcode, productName, p
               var svgElement = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
               document.getElementById('barcode-container').appendChild(svgElement);
               
-              // Générer le code-barres
+              // Générer le code-barres (Code 128 supporte les codes alphanumériques)
               JsBarcode(svgElement, "${barcode}", {
                 format: "CODE128",
                 width: 2,
