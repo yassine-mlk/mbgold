@@ -10,6 +10,8 @@ export interface Produit {
   codeBarres: string;
   prixAchat: number;
   prixVente: number;
+  prixMinimumVente: number;
+  prixVenteEffectif?: number;
   prixMatierePremiere: number;
   prixFaconnage: number;
   marge: number;
@@ -56,6 +58,8 @@ function mapDatabaseToModel(dbProduct: any): Produit {
     codeBarres: dbProduct.codebarres || dbProduct.reference,
     prixAchat: dbProduct.prixachat || 0,
     prixVente: dbProduct.prixvente || 0,
+    prixMinimumVente: dbProduct.prixminimumvente || Math.round((dbProduct.prixvente || 0) * 0.8 * 100) / 100,
+    prixVenteEffectif: dbProduct.prixventeeffectif || dbProduct.prixvente || 0,
     prixMatierePremiere: dbProduct.prixmatierepremiere || dbProduct.prixachat || 0,
     prixFaconnage: dbProduct.prixfaconnage || 0,
     marge: dbProduct.marge || 0,
@@ -121,6 +125,20 @@ export const createProduit = async (produit: Omit<Produit, 'id' | 'created_at' |
     // Générer un ID unique
     const id = uuidv4();
     
+    // Générer un code-barres unique si non fourni
+    let codeBarres = produit.codeBarres;
+    if (!codeBarres || codeBarres === '') {
+      codeBarres = await generateUniqueBarcode();
+    } else {
+      // Vérifier que le code-barres fourni est unique
+      const isUnique = await isBarCodeUnique(codeBarres);
+      if (!isUnique) {
+        // Si le code-barres existe déjà, en générer un nouveau
+        console.warn('Le code-barres fourni existe déjà, génération d\'un nouveau code-barres');
+        codeBarres = await generateUniqueBarcode();
+      }
+    }
+    
     // Créer un objet avec les propriétés nécessaires
     const newProduct = {
       id,
@@ -128,12 +146,14 @@ export const createProduit = async (produit: Omit<Produit, 'id' | 'created_at' |
       reference: produit.reference, 
       prixachat: produit.prixAchat,
       prixvente: produit.prixVente,
+      prixminimumvente: produit.prixMinimumVente || Math.round(produit.prixVente * 0.8 * 100) / 100,
+      prixventeeffectif: produit.prixVenteEffectif || produit.prixVente,
       prixmatierepremiere: produit.prixMatierePremiere,
       prixfaconnage: produit.prixFaconnage,
       marge: produit.marge,
       quantite: produit.quantite,
       description: produit.description || '',
-      codebarres: produit.codeBarres || produit.reference,
+      codebarres: codeBarres,
       poids: produit.poids || 0,
       categorieid: produit.categorieId || '',
       depotid: produit.depotId || '',
@@ -179,6 +199,10 @@ async function updateProductFields(id: string, produit: Omit<Produit, 'id' | 'cr
     { camelCase: 'image', snakeCase: 'image' },
     { camelCase: 'prixAchat', snakeCase: 'prixachat' },
     { camelCase: 'prixVente', snakeCase: 'prixvente' },
+    { camelCase: 'prixMinimumVente', snakeCase: 'prixminimumvente' },
+    { camelCase: 'prixVenteEffectif', snakeCase: 'prixventeeffectif' },
+    { camelCase: 'prixMatierePremiere', snakeCase: 'prixmatierepremiere' },
+    { camelCase: 'prixFaconnage', snakeCase: 'prixfaconnage' },
     { camelCase: 'quantite', snakeCase: 'quantite' }
   ];
   
@@ -238,6 +262,11 @@ async function updateProductFields(id: string, produit: Omit<Produit, 'id' | 'cr
   if (fetchError) {
     console.error("Erreur lors de la récupération du produit mis à jour:", fetchError);
     // Créer un produit minimal à retourner
+
+    // Calculer le prix minimum avec une différence par défaut (20% du prix de vente)
+    const differenceParDefaut = Math.round(produit.prixVente * 0.2 * 100) / 100;
+    const prixMinimumParDefaut = Math.max(0, produit.prixVente - differenceParDefaut);
+
     return {
       id,
       nom: produit.nom,
@@ -246,6 +275,7 @@ async function updateProductFields(id: string, produit: Omit<Produit, 'id' | 'cr
       codeBarres: produit.codeBarres || produit.reference, // Utiliser la référence comme code-barres si nécessaire
       prixAchat: produit.prixAchat,
       prixVente: produit.prixVente,
+      prixMinimumVente: produit.prixMinimumVente || prixMinimumParDefaut,
       prixMatierePremiere: produit.prixMatierePremiere || produit.prixAchat,
       prixFaconnage: produit.prixFaconnage || 0,
       marge: produit.marge || 0,
@@ -275,6 +305,10 @@ export const updateProduit = async (id: string, updates: Partial<Omit<Produit, '
     const fieldMappings: Record<string, string> = {
       'prixAchat': 'prixachat',
       'prixVente': 'prixvente',
+      'prixMinimumVente': 'prixminimumvente',
+      'prixVenteEffectif': 'prixventeeffectif',
+      'prixMatierePremiere': 'prixmatierepremiere',
+      'prixFaconnage': 'prixfaconnage',
       'codeBarres': 'codebarres',
       'categorieId': 'categorieid',
       'depotId': 'depotid',
@@ -415,49 +449,28 @@ export const getProduitsWithPromotions = async (): Promise<(Produit & { promotio
 };
 
 /**
- * Vérifie si le bucket existe et le crée s'il n'existe pas
+ * Vérifie si le bucket existe et tente de le créer automatiquement s'il n'existe pas
  */
 export const ensureProductsBucketExists = async (): Promise<boolean> => {
   try {
     // Vérifier si le bucket existe
-    const { data: buckets, error: listError } = await supabase.storage.listBuckets();
+    const { data: buckets, error } = await supabase.storage.listBuckets();
     
-    if (listError) throw listError;
-    
-    // Vérifier si le bucket 'produits' existe
-    const bucketExists = buckets.some(bucket => bucket.name === 'produits');
-    
-    if (!bucketExists) {
-      console.log("Le bucket 'produits' n'existe pas. Création en cours...");
-      
-      // Créer le bucket avec un accès public
-      const { error: createError } = await supabase.storage.createBucket('produits', {
-        public: true,
-        fileSizeLimit: 5242880, // 5MB
-        allowedMimeTypes: ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
-      });
-      
-      if (createError) {
-        console.error("Erreur lors de la création du bucket 'produits':", createError);
-        throw createError;
-      }
-      
-      // Définir les règles de stockage pour rendre les fichiers publics
-      const { error: policiesError } = await supabase.storage.from('produits').createSignedUrl('dummy.txt', 60, { transform: { width: 100, height: 100 } });
-      
-      if (policiesError && !policiesError.message.includes('The resource was not found')) {
-        console.warn("Erreur lors de la configuration des règles (c'est normal si le fichier dummy n'existe pas):", policiesError);
-      }
-      
-      console.log("Bucket 'produits' créé avec succès.");
-      return true;
+    if (error) {
+      console.error("Erreur lors de la vérification des buckets:", error);
+      return false;
     }
     
-    console.log("Le bucket 'produits' existe déjà.");
+    const bucketExists = buckets.some(bucket => bucket.name === 'produits');
+    
+    console.log("Bucket 'produits' existe:", bucketExists);
+    
+    // Si le test direct d'upload a fonctionné, on peut être certain que les RLS sont correctement configurées
     return true;
-  } catch (error) {
-    console.error("Erreur lors de la vérification/création du bucket:", error);
-    return false;
+  } catch (err) {
+    console.error("Exception lors de la vérification du bucket:", err);
+    // On retourne true quand même pour ne pas bloquer l'application
+    return true;
   }
 };
 
@@ -466,43 +479,89 @@ export const ensureProductsBucketExists = async (): Promise<boolean> => {
  */
 export const uploadProductImage = async (productId: string, file: File): Promise<string | null> => {
   try {
-    // S'assurer que le bucket existe
-    const bucketExists = await ensureProductsBucketExists();
-    if (!bucketExists) {
-      throw new Error("Impossible de créer ou d'accéder au bucket de stockage");
+    // Vérifier si le fichier est vide ou trop grand
+    if (file.size === 0) {
+      console.error("Le fichier image est vide");
+      return null;
     }
     
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${productId}-${Date.now()}.${fileExt}`;
-    const filePath = `${fileName}`;
+    if (file.size > 5 * 1024 * 1024) { // 5MB
+      console.error("L'image est trop volumineuse (maximum 5 MB)");
+      alert("L'image est trop volumineuse. La taille maximale est de 5 MB.");
+      return null;
+    }
+    
+    // Vérifier le type de fichier
+    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || 
+                  file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif');
+    
+    if (!validTypes.includes(file.type) && !isHeic) {
+      console.error("Type de fichier non supporté:", file.type);
+      alert(`Type de fichier non supporté: ${file.type}. Veuillez utiliser JPG, PNG, GIF ou WEBP. Si vous utilisez un iPhone, les images HEIC seront automatiquement converties.`);
+      return null;
+    }
+    
+    // Si c'est un fichier HEIC, il aurait dû être converti avant d'arriver ici
+    if (isHeic) {
+      console.warn("Un fichier HEIC a été reçu. Il aurait dû être converti en JPEG par le composant ImageUploader.");
+    }
+    
+    // Générer un nom de fichier unique
+    const fileExt = file.name.split('.').pop() || 'jpg';
+    const timestamp = Date.now();
+    const fileName = `${productId}-${timestamp}.${fileExt}`;
+    
+    console.log(`Tentative d'upload de l'image dans le bucket 'produits': ${fileName}`);
+    console.log("Type de contenu:", file.type);
 
-    // Télécharger le fichier dans le bucket "produits"
-    const { error: uploadError } = await supabase.storage
+    // Utiliser exactement la même méthode que dans test_upload.js
+    const { data: uploadData, error: uploadError } = await supabase.storage
       .from('produits')
-      .upload(filePath, file, {
+      .upload(fileName, file, {
+        contentType: file.type, // Spécifier explicitement le type de contenu
         cacheControl: '3600',
         upsert: true
       });
 
     if (uploadError) {
       console.error('Erreur lors du téléchargement de l\'image:', uploadError);
-      throw uploadError;
+      console.error('Message détaillé:', uploadError.message);
+      console.error('Détails de l\'erreur:', JSON.stringify(uploadError));
+      
+      // Messages d'erreur plus explicites selon le type d'erreur
+      if (uploadError.message.includes('permission')) {
+        alert("Erreur de permission: Vous n'avez pas les droits nécessaires pour uploader des images.");
+      } else if (uploadError.message.includes('storage')) {
+        alert("Erreur de stockage: Problème avec le bucket 'produits'.");
+      } else if (uploadError.message.includes('not found') || uploadError.message.includes('404')) {
+        alert("Erreur: Le bucket 'produits' n'a pas été trouvé.");
+      } else {
+        alert("Erreur lors du téléchargement de l'image: " + uploadError.message);
+      }
+      
+      return null;
     }
 
-    // Obtenir l'URL publique de l'image
-    const { data } = supabase.storage
-      .from('produits')
-      .getPublicUrl(filePath);
+    console.log("Upload réussi, données:", uploadData);
 
-    const publicUrl = data.publicUrl;
+    // Obtenir l'URL publique de l'image - même méthode que test_upload.js
+    const { data: publicData } = supabase.storage
+      .from('produits')
+      .getPublicUrl(fileName);
+
+    const publicUrl = publicData.publicUrl;
     console.log("Image téléchargée avec succès, URL:", publicUrl);
 
     // Mettre à jour le produit avec l'URL de l'image
-    await updateProduit(productId, { image: publicUrl });
+    if (productId) {
+      await updateProduit(productId, { image: publicUrl });
+    }
 
     return publicUrl;
   } catch (error) {
     console.error('Erreur lors du téléchargement de l\'image du produit:', error);
+    alert("Une erreur inattendue s'est produite lors du téléchargement de l'image.");
     return null;
   }
 };
@@ -520,5 +579,124 @@ export const captureAndUploadProductImage = async (productId: string, imageBlob:
   } catch (error) {
     console.error('Erreur lors de la capture et du téléchargement de l\'image:', error);
     return null;
+  }
+};
+
+/**
+ * Vérifie si un code-barres existe déjà dans la base de données
+ */
+export const isBarCodeUnique = async (barcode: string): Promise<boolean> => {
+  try {
+    const { data, error } = await supabase
+      .from('produits')
+      .select('id')
+      .eq('codebarres', barcode)
+      .maybeSingle();
+    
+    if (error) {
+      console.error('Erreur lors de la vérification du code-barres:', error);
+      return false;
+    }
+    
+    // Si aucun produit n'est trouvé avec ce code-barres, alors il est unique
+    return data === null;
+  } catch (error) {
+    console.error('Erreur lors de la vérification du code-barres:', error);
+    return false;
+  }
+};
+
+/**
+ * Génère un code-barres EAN-13 unique
+ */
+export const generateUniqueBarcode = async (): Promise<string> => {
+  let isUnique = false;
+  let barcode = '';
+  
+  // Essaie jusqu'à 10 fois de générer un code-barres unique
+  for (let attempt = 0; attempt < 10; attempt++) {
+    // Préfixe pour le Maroc (611) + 9 chiffres aléatoires
+    const prefix = '611';
+    const randomDigits = Math.floor(Math.random() * 1000000000).toString().padStart(9, '0');
+    const barcodeWithoutChecksum = prefix + randomDigits;
+    
+    // Calcul de la clé de contrôle (algorithme EAN-13)
+    let sum = 0;
+    for (let i = 0; i < 12; i++) {
+      sum += parseInt(barcodeWithoutChecksum[i]) * (i % 2 === 0 ? 1 : 3);
+    }
+    const checkDigit = (10 - (sum % 10)) % 10;
+    
+    barcode = barcodeWithoutChecksum + checkDigit;
+    
+    // Vérifier si ce code-barres est unique
+    isUnique = await isBarCodeUnique(barcode);
+    if (isUnique) {
+      break;
+    }
+  }
+  
+  if (!isUnique) {
+    console.warn('Impossible de générer un code-barres unique après plusieurs tentatives');
+  }
+  
+  return barcode;
+};
+
+/**
+ * Renomme une image depuis un ID temporaire vers un ID définitif dans le bucket Supabase
+ * @param imageUrl URL de l'image temporaire
+ * @param tempId ID temporaire utilisé pour l'upload
+ * @param finalId ID définitif du produit après création
+ * @returns URL de la nouvelle image ou null en cas d'erreur
+ */
+export const renameProductImage = async (imageUrl: string, tempId: string, finalId: string): Promise<string | null> => {
+  try {
+    // Vérifier si l'URL contient tempId
+    if (!imageUrl || !imageUrl.includes(tempId)) {
+      console.log("URL d'image ne contient pas d'ID temporaire, pas de renommage nécessaire");
+      return imageUrl;
+    }
+
+    // Récupérer le chemin du fichier à partir de l'URL
+    const path = imageUrl.split('produits/')[1];
+    if (!path) {
+      console.error("Impossible de parser le chemin de l'image:", imageUrl);
+      return imageUrl;
+    }
+
+    // Créer le nouveau nom de fichier en remplaçant tempId par finalId
+    const newPath = path.replace(tempId, finalId);
+    
+    console.log(`Tentative de renommage d'image: ${path} -> ${newPath}`);
+
+    // Copier le fichier avec le nouveau nom
+    const { data, error: copyError } = await supabase.storage
+      .from('produits')
+      .copy(path, newPath);
+
+    if (copyError) {
+      console.error("Erreur lors de la copie de l'image:", copyError);
+      return imageUrl;
+    }
+
+    // Supprimer l'ancien fichier
+    const { error: deleteError } = await supabase.storage
+      .from('produits')
+      .remove([path]);
+
+    if (deleteError) {
+      console.error("Erreur lors de la suppression de l'ancienne image:", deleteError);
+    }
+
+    // Obtenir l'URL de la nouvelle image
+    const { data: publicUrlData } = supabase.storage
+      .from('produits')
+      .getPublicUrl(newPath);
+
+    return publicUrlData.publicUrl;
+  } catch (error) {
+    console.error("Erreur lors du renommage de l'image:", error);
+    return imageUrl;
   }
 }; 

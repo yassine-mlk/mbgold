@@ -10,11 +10,17 @@ import { Produit } from '@/services/supabase/stock';
 import { Category, Depot, getSettings } from '@/services/supabase/parametres';
 import { Loader2, Calculator } from 'lucide-react';
 import ImageUploader from './ImageUploader';
+import DirectImageUploader from './DirectImageUploader';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 
+// Feature flag for using direct image uploader
+const USE_DIRECT_UPLOADER = true; // Set to true to use DirectImageUploader
+
 // Extension du type Produit pour le formulaire
-type ProduitForm = Omit<Produit, 'id' | 'reference' | 'created_at' | 'updated_at'>;
+type ProduitForm = Omit<Produit, 'id' | 'reference' | 'created_at' | 'updated_at'> & {
+  prixMinimumVente: number;
+};
 
 type ProduitFormWithTeamProps = {
   onSubmit: (data: Omit<Produit, 'id' | 'reference' | 'created_at' | 'updated_at'>) => void;
@@ -32,7 +38,12 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
   const [marge, setMarge] = useState<number>(0);
   const [prixDeRevient, setPrixDeRevient] = useState<number>(0);
   const [prixVenteFinal, setPrixVenteFinal] = useState<number>(initialValues?.prixVente || 0);
+  const [prixMinimumVente, setPrixMinimumVente] = useState<number>(initialValues?.prixMinimumVente || 0);
+  const [differenceMinimumVente, setDifferenceMinimumVente] = useState<number>(0);
   const { user } = useAuth();
+  
+  // Générer un ID temporaire pour l'upload d'image s'il n'y a pas d'ID initial
+  const [tempProductId] = useState(`temp-${Date.now()}`);
   
   // Initialiser les valeurs à partir de initialValues si disponible
   useEffect(() => {
@@ -52,6 +63,12 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
       // Prix de revient = matière + façonnage
       const prixRevient = prixMatiere + faconnageValue;
       setPrixDeRevient(prixRevient);
+      
+      // Calculer la différence initiale entre prix de vente et prix minimum
+      if (initialValues.prixVente && initialValues.prixMinimumVente) {
+        const difference = initialValues.prixVente - initialValues.prixMinimumVente;
+        setDifferenceMinimumVente(difference > 0 ? difference : 0);
+      }
     }
   }, [initialValues]);
   
@@ -95,7 +112,8 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
           marge: 0,
           codeBarres: generateUniqueBarcode(),
           poids: 0,
-          image: ''
+          image: '',
+          prixMinimumVente: 0
         }
   });
 
@@ -118,6 +136,8 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
       const nouveauPrixVente = nouveauPrixMatiere + faconnage + marge;
       setPrixVenteFinal(nouveauPrixVente);
       form.setValue('prixVente', nouveauPrixVente);
+      
+      // Le prix minimum de vente sera automatiquement mis à jour par l'effet
     }
   }, [form.watch('poids'), prixMatierePremiere, faconnage, marge, form]);
 
@@ -168,6 +188,17 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
     return () => clearInterval(interval);
   }, [user, form, prixMatierePremiere, faconnage, marge]);
 
+  // Calcul du prix minimum de vente lorsque le prix de vente change
+  useEffect(() => {
+    // Cette logique est simplifiée pour éviter l'actualisation automatique
+    // On ne met à jour le prix minimum que lorsque le formulaire est initialisé
+    if (!form.formState.isDirty && initialValues) {
+      const prixMin = initialValues.prixMinimumVente || 0;
+      setPrixMinimumVente(prixMin);
+      form.setValue('prixMinimumVente', prixMin);
+    }
+  }, [initialValues, form]);
+
   const handleFormSubmit = (values: ProduitForm) => {
     // Ajouter l'URL de l'image et les composantes de prix aux valeurs
     const processedValues = {
@@ -175,8 +206,13 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
       image: imageUrl,
       prixMatierePremiere: prixCalcule,
       prixFaconnage: faconnage,
-      marge: marge
+      marge: marge,
+      // On garde le prix minimum tel qu'il est, sans le recalculer
+      prixMinimumVente: prixMinimumVente,
+      prixVente: prixVenteFinal
     };
+    
+    console.log('Valeurs du formulaire à soumettre:', processedValues);
     onSubmit(processedValues);
   };
 
@@ -204,6 +240,8 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
       setPrixVenteFinal(nouveauPrixVente);
       form.setValue('prixVente', nouveauPrixVente);
       
+      // On ne met plus à jour automatiquement le prix minimum de vente
+      
       return nouveauPrixMatiere;
     }
     return 0;
@@ -222,17 +260,20 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
     setPrixVenteFinal(nouveauPrixVente);
     form.setValue('prixVente', nouveauPrixVente);
     form.setValue('prixFaconnage', nouvelleFaconnage);
+    
+    // On ne met plus à jour automatiquement le prix minimum de vente
   };
   
   // Calcul des prix lorsque la marge change
   const handleMargeChange = (nouvelleMarge: number) => {
     setMarge(nouvelleMarge);
     
-    // Mise à jour du prix de vente = matière + façonnage + marge
-    const nouveauPrixVente = prixCalcule + faconnage + nouvelleMarge;
+    // Mise à jour du prix de vente final = prix de revient + marge
+    const nouveauPrixVente = prixDeRevient + nouvelleMarge;
     setPrixVenteFinal(nouveauPrixVente);
     form.setValue('prixVente', nouveauPrixVente);
-    form.setValue('marge', nouvelleMarge);
+    
+    // On ne met plus à jour automatiquement le prix minimum de vente
   };
 
   // Montrer un indicateur de chargement si nécessaire
@@ -250,11 +291,19 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
         {/* Upload d'image */}
         <div className="mb-6">
           <Label>Image du produit</Label>
-          <ImageUploader 
-            productId={initialValues?.id} 
-            onImageUploaded={handleImageUploaded}
-            existingImageUrl={initialValues?.image}
-          />
+          {USE_DIRECT_UPLOADER ? (
+            <DirectImageUploader 
+              productId={initialValues?.id || tempProductId} 
+              onImageUploaded={handleImageUploaded}
+              existingImageUrl={initialValues?.image}
+            />
+          ) : (
+            <ImageUploader 
+              productId={initialValues?.id || tempProductId} 
+              onImageUploaded={handleImageUploaded}
+              existingImageUrl={initialValues?.image}
+            />
+          )}
           {imageUrl && (
             <div className="mt-2 border rounded-md p-2 w-32 h-32 flex items-center justify-center">
               <img 
@@ -396,6 +445,30 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
             </div>
           </div>
           
+          {/* Prix minimum de vente */}
+          <div className="space-y-2 mb-4 border-2 border-orange-300 p-3 rounded-md bg-orange-50">
+            <Label htmlFor="prixMinimumVente" className="font-semibold">Prix minimum de vente (DH)</Label>
+            <Input 
+              id="prixMinimumVente"
+              type="number" 
+              min="0" 
+              step="0.01"
+              value={prixMinimumVente}
+              onChange={(e) => {
+                const nouveauPrixMinimum = parseFloat(e.target.value) || 0;
+                setPrixMinimumVente(nouveauPrixMinimum);
+                form.setValue('prixMinimumVente', nouveauPrixMinimum);
+                
+                // Ne pas mettre à jour automatiquement la différence car nous voulons
+                // que le prix minimum soit indépendant
+              }}
+              placeholder="Prix minimum de vente"
+            />
+            <div className="text-xs text-muted-foreground">
+              Prix minimum en dessous duquel le produit ne devrait pas être vendu
+            </div>
+          </div>
+          
           {/* Prix de vente final */}
           <div className="p-3 bg-primary/10 rounded-md mb-4 border-2 border-primary">
             <Label>Prix de vente final</Label>
@@ -429,6 +502,11 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
           type="hidden" 
           {...form.register('marge')}
           value={marge} 
+        />
+        <input 
+          type="hidden" 
+          {...form.register('prixMinimumVente')}
+          value={prixMinimumVente} 
         />
 
         <FormField

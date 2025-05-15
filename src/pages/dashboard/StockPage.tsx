@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, Search, Filter, Edit, Trash2, Package, UserCircle, Percent, Combine, Barcode, Printer, Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,18 @@ import ProduitFormWithTeam from '@/components/stock/ProduitFormWithTeam';
 import ComposeProductForm from '@/components/stock/ComposeProductForm';
 import ProductPromotionForm from '@/components/stock/ProductPromotionForm';
 import BarcodeDisplay from '@/components/stock/BarcodeDisplay';
-import { getProduits, getProduitsWithPromotions, createProduit, updateProduit, deleteProduit, createPromotion, deletePromotion } from '@/services/supabase/stock';
+import { 
+  getProduits, 
+  getProduitsWithPromotions, 
+  createProduit, 
+  updateProduit, 
+  deleteProduit, 
+  createPromotion, 
+  deletePromotion,
+  Produit,
+  generateUniqueBarcode,
+  renameProductImage
+} from '@/services/supabase/stock';
 import { getTeamMembers, TeamMember } from '@/services/supabase/team';
 import { getDepots, getCategories, Category } from '@/services/supabase/parametres';
 import { useNavigate } from 'react-router-dom';
@@ -27,24 +38,18 @@ export interface Depot {
   adresse: string;
 }
 
-export interface Produit {
+export interface Promotion {
   id: string;
-  nom: string;
-  description: string;
-  reference: string;
-  codeBarres: string;
-  prixAchat: number;
-  prixVente: number;
-  quantite: number;
-  poids: number;
-  categorieId: string;
-  depotId: string;
-  image: string;
-  compose?: boolean;
-  composants?: {
-    produitId: string;
-    quantite: number;
-  }[];
+  produitId: string;
+  type: 'pourcentage' | 'montant' | 'bundle';
+  valeur: number;
+  dateDebut: string;
+  dateFin: string;
+  description?: string;
+}
+
+// Étendre le type Produit pour les besoins spécifiques de StockPage
+interface ProduitEtendu extends Produit {
   teamMemberId?: string;
   promotion?: {
     id: string;
@@ -56,20 +61,10 @@ export interface Produit {
   };
 }
 
-export interface Promotion {
-  id: string;
-  produitId: string;
-  type: 'pourcentage' | 'montant' | 'bundle';
-  valeur: number;
-  dateDebut: string;
-  dateFin: string;
-  description?: string;
-}
-
 const StockPage = () => {
   const [activeTab, setActiveTab] = useState<'produits' | 'compositions' | 'promotions'>('produits');
   const [displayMode, setDisplayMode] = useState<'table' | 'card'>('card');
-  const [produits, setProduits] = useState<Produit[]>([]);
+  const [produits, setProduits] = useState<ProduitEtendu[]>([]);
   const [categories, setCategories] = useState<Categorie[]>([]);
   const [depots, setDepots] = useState<Depot[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
@@ -77,7 +72,7 @@ const StockPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [categorieFilter, setCategorieFilter] = useState<string>('all');
   const [depotFilter, setDepotFilter] = useState<string>('all');
-  const [selectedProduit, setSelectedProduit] = useState<Produit | null>(null);
+  const [selectedProduit, setSelectedProduit] = useState<ProduitEtendu | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -98,37 +93,66 @@ const StockPage = () => {
   });
   const navigate = useNavigate();
 
+  const loadProduitsData = useCallback(async () => {
+    setIsLoading(prev => ({ ...prev, produits: true }));
+    
+    try {
+      // Récupérer les produits avec leurs promotions
+      const produitsWithPromotions = await getProduitsWithPromotions();
+      
+      // Convertir en ProduitEtendu
+      const produitsEtendus = produitsWithPromotions.map(p => p as ProduitEtendu);
+      
+      setProduits(produitsEtendus);
+    } catch (error) {
+      console.error("Erreur lors du chargement des produits:", error);
+      toast.error("Erreur lors du chargement des produits");
+    } finally {
+      setIsLoading(prev => ({ ...prev, produits: false }));
+    }
+  }, []);
+
   useEffect(() => {
     const loadData = async () => {
-      setIsLoading(prev => ({ ...prev, produits: true, categories: true, depots: true, teamMembers: true, promotions: true }));
-      
       try {
-        const produitsData = await getProduitsWithPromotions();
-        setProduits(produitsData);
-        
-        const promotionsData = produitsData
-          .filter(p => p.promotion)
-          .map(p => p.promotion) as Promotion[];
-        setPromotions(promotionsData);
-        
+        // Récupérer les catégories
+        setIsLoading(prev => ({ ...prev, categories: true }));
         const categoriesData = await getCategories();
         setCategories(categoriesData);
+        setIsLoading(prev => ({ ...prev, categories: false }));
         
+        // Récupérer les dépôts
+        setIsLoading(prev => ({ ...prev, depots: true }));
         const depotsData = await getDepots();
         setDepots(depotsData);
+        setIsLoading(prev => ({ ...prev, depots: false }));
         
+        // Récupérer les membres de l'équipe
+        setIsLoading(prev => ({ ...prev, teamMembers: true }));
         const teamMembersData = await getTeamMembers();
         setTeamMembers(teamMembersData);
+        setIsLoading(prev => ({ ...prev, teamMembers: false }));
+        
+        // Charger les produits avec la fonction dédiée
+        await loadProduitsData();
       } catch (error) {
-        console.error('Erreur lors du chargement des données:', error);
-        toast.error('Erreur lors du chargement des données');
-      } finally {
-        setIsLoading(prev => ({ ...prev, produits: false, categories: false, depots: false, teamMembers: false, promotions: false }));
+        console.error("Erreur lors du chargement des données:", error);
+        toast.error("Erreur lors du chargement des données");
       }
     };
     
     loadData();
-  }, []);
+  }, [loadProduitsData]);
+
+  // Mettre à jour les promotions lorsque les produits changent
+  useEffect(() => {
+    if (produits.length > 0) {
+      const promotionsData = produits
+        .filter(p => p.promotion)
+        .map(p => p.promotion) as Promotion[];
+      setPromotions(promotionsData);
+    }
+  }, [produits]);
 
   const filteredProduits = produits.filter(produit => {
     const matchesSearch = produit.nom.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -172,24 +196,47 @@ const StockPage = () => {
     setIsLoading(prev => ({ ...prev, add: true }));
     
     try {
+      // Vérifier si l'image a été uploadée avec un ID temporaire
+      const imageUrl = produitData.image || '';
+      let tempProductId = '';
+      
+      // Détecter si l'image contient un ID temporaire (format: temp-timestamp)
+      if (imageUrl && imageUrl.includes('temp-')) {
+        const match = imageUrl.match(/temp-\d+/);
+        if (match && match[0]) {
+          tempProductId = match[0];
+          console.log("ID temporaire détecté:", tempProductId);
+        }
+      }
+      
       // Générer une référence interne pour le produit
       const reference = `REF-${new Date().getFullYear().toString().substring(2)}-${String(produits.length + 1).padStart(3, '0')}`;
       
-      // Si le code-barres n'est pas fourni, générer un nouveau code-barres unique (EAN-13)
-      const codeBarres = produitData.codeBarres || generateUniqueBarcode();
-      
-      // Créer le produit dans Supabase
+      // Créer le produit dans Supabase (le service va générer un code-barres unique si nécessaire)
       const newProduit = await createProduit({
         ...produitData,
         reference,
-        codeBarres,
         poids: produitData.poids || 0,
-        image: produitData.image || ''
+        image: imageUrl, // on garde l'URL temporaire pour l'instant
       });
       
       if (newProduit) {
+        // Si une image temporaire a été utilisée, la renommer avec l'ID définitif
+        let finalImageUrl = imageUrl;
+        if (tempProductId && newProduit.id) {
+          console.log(`Renommage de l'image: ${tempProductId} -> ${newProduit.id}`);
+          const updatedImageUrl = await renameProductImage(imageUrl, tempProductId, newProduit.id);
+          if (updatedImageUrl) {
+            finalImageUrl = updatedImageUrl;
+            
+            // Mettre à jour l'URL de l'image dans le produit
+            await updateProduit(newProduit.id, { image: finalImageUrl });
+            newProduit.image = finalImageUrl;
+          }
+        }
+        
         // Ajouter le nouveau produit à l'état local
-        setProduits(prev => [...prev, newProduit]);
+        setProduits(prev => [...prev, newProduit as ProduitEtendu]);
         
         toast.success("Produit ajouté avec succès");
       } else {
@@ -202,22 +249,6 @@ const StockPage = () => {
       setIsLoading(prev => ({ ...prev, add: false }));
       setIsAddDialogOpen(false);
     }
-  };
-
-  const generateUniqueBarcode = (): string => {
-    const countryPrefix = "611";
-    
-    const randomPart = Math.floor(Math.random() * 1000000000).toString().padStart(9, '0');
-    
-    const codeWithoutChecksum = countryPrefix + randomPart;
-    
-    let sum = 0;
-    for (let i = 0; i < 12; i++) {
-      sum += parseInt(codeWithoutChecksum[i]) * (i % 2 === 0 ? 1 : 3);
-    }
-    const checksum = (10 - (sum % 10)) % 10;
-    
-    return codeWithoutChecksum + checksum;
   };
 
   const handleComposeProduct = async (compositionData: {
@@ -245,8 +276,11 @@ const StockPage = () => {
       // Générer une référence unique pour le produit composé
       const reference = `COMP-${new Date().getFullYear().toString().substring(2)}-${String(produits.filter(p => p.compose).length + 1).padStart(3, '0')}`;
       
-      // Générer un code-barres unique pour le produit composé
-      const codeBarres = generateUniqueBarcode();
+      // Générer un code-barres unique pour le produit composé (fonction asynchrone)
+      const codeBarres = await generateUniqueBarcode();
+      
+      // Calculer le prix minimum de vente (80% du prix de vente par défaut)
+      const prixMinimumVente = Math.round(prixVente * 0.8 * 100) / 100;
       
       // Créer le produit composé dans Supabase
       const newProduit = await createProduit({
@@ -256,6 +290,10 @@ const StockPage = () => {
         codeBarres,
         prixAchat: prixAchatTotal,
         prixVente,
+        prixMinimumVente,
+        prixMatierePremiere: prixAchatTotal,
+        prixFaconnage: 0,
+        marge: prixVente - prixAchatTotal,
         quantite: 0,
         categorieId,
         depotId,
@@ -267,7 +305,7 @@ const StockPage = () => {
       
       if (newProduit) {
         // Ajouter le nouveau produit à l'état local
-        setProduits(prev => [...prev, newProduit]);
+        setProduits(prev => [...prev, newProduit as ProduitEtendu]);
         
         toast.success("Produit composé créé avec succès");
       } else {
@@ -1286,6 +1324,8 @@ const StockPage = () => {
               barcode={selectedProduit.codeBarres}
               productName={selectedProduit.nom}
               price={selectedProduit.prixVente}
+              weight={selectedProduit.poids}
+              category={getCategoryName(selectedProduit.categorieId)}
             />
           )}
           
