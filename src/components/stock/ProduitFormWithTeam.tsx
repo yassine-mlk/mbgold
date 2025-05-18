@@ -6,13 +6,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form';
-import { Produit } from '@/services/supabase/stock';
+import { Produit, generateAlphaNumericBarcode } from '@/services/supabase/stock';
 import { Category, Depot, getSettings } from '@/services/supabase/parametres';
 import { Loader2, Calculator } from 'lucide-react';
 import ImageUploader from './ImageUploader';
 import DirectImageUploader from './DirectImageUploader';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
+import { v4 as uuidv4 } from 'uuid';
 
 // Feature flag for using direct image uploader
 const USE_DIRECT_UPLOADER = true; // Set to true to use DirectImageUploader
@@ -30,20 +31,23 @@ type ProduitFormWithTeamProps = {
 };
 
 const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: ProduitFormWithTeamProps) => {
+  const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [imageUrl, setImageUrl] = useState<string>(initialValues?.image || '');
+  const [tempProductId] = useState(uuidv4());
+  
+  // États pour les composantes de prix
   const [prixMatierePremiere, setPrixMatierePremiere] = useState<number>(0);
-  const [prixCalcule, setPrixCalcule] = useState<number>(0);
+  const [prixFaconnageParGramme, setPrixFaconnageParGramme] = useState<number>(0);
   const [faconnage, setFaconnage] = useState<number>(0);
   const [marge, setMarge] = useState<number>(0);
-  const [prixDeRevient, setPrixDeRevient] = useState<number>(0);
-  const [prixVenteFinal, setPrixVenteFinal] = useState<number>(initialValues?.prixVente || 0);
-  const [prixMinimumVente, setPrixMinimumVente] = useState<number>(initialValues?.prixMinimumVente || 0);
-  const [differenceMinimumVente, setDifferenceMinimumVente] = useState<number>(0);
-  const { user } = useAuth();
   
-  // Générer un ID temporaire pour l'upload d'image s'il n'y a pas d'ID initial
-  const [tempProductId] = useState(`temp-${Date.now()}`);
+  // Prix calculés
+  const [prixCalcule, setPrixCalcule] = useState<number>(0);
+  const [prixDeRevient, setPrixDeRevient] = useState<number>(0);
+  const [prixVenteFinal, setPrixVenteFinal] = useState<number>(0);
+  const [prixMinimumVente, setPrixMinimumVente] = useState<number>(0);
+  const [differenceMinimumVente, setDifferenceMinimumVente] = useState<number>(0);
   
   // Initialiser les valeurs à partir de initialValues si disponible
   useEffect(() => {
@@ -72,14 +76,6 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
     }
   }, [initialValues]);
   
-  // Générer un code-barres unique
-  const generateUniqueBarcode = () => {
-    // Format alphanumérique (RF + 5 chiffres)
-    const prefix = 'RF';
-    const randomNumber = Math.floor(Math.random() * 100000).toString().padStart(5, '0');
-    return `${prefix}${randomNumber}`;
-  };
-
   const form = useForm<ProduitForm>({
     defaultValues: initialValues 
       ? { 
@@ -101,66 +97,68 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
           prixMatierePremiere: 0,
           prixFaconnage: 0,
           marge: 0,
-          codeBarres: generateUniqueBarcode(),
+          codeBarres: '',
           poids: 0,
           image: '',
           prixMinimumVente: 0
         }
   });
-
-  // Mise à jour du prix calculé basé sur le poids
+  
+  // Générer un code-barres unique à l'initialisation du formulaire
   useEffect(() => {
-    const poids = form.watch('poids');
-    if (poids && prixMatierePremiere) {
-      const nouveauPrixMatiere = poids * prixMatierePremiere;
-      setPrixCalcule(nouveauPrixMatiere);
-      
-      // Met à jour le prix d'achat avec le prix de la matière première calculé
-      form.setValue('prixAchat', nouveauPrixMatiere);
-      form.setValue('prixMatierePremiere', nouveauPrixMatiere);
-      
-      // Mise à jour du prix de revient = matière + façonnage
-      const nouveauPrixRevient = nouveauPrixMatiere + faconnage;
-      setPrixDeRevient(nouveauPrixRevient);
-      
-      // Mise à jour du prix de vente final = prix de revient + marge
-      const nouveauPrixVente = nouveauPrixMatiere + faconnage + marge;
-      setPrixVenteFinal(nouveauPrixVente);
-      form.setValue('prixVente', nouveauPrixVente);
-      
-      // Le prix minimum de vente sera automatiquement mis à jour par l'effet
-    }
-  }, [form.watch('poids'), prixMatierePremiere, faconnage, marge, form]);
+    const initializeBarcode = async () => {
+      // Générer un code-barres uniquement si c'est un nouveau produit et qu'aucun code n'est défini
+      if (!initialValues && (!form.getValues('codeBarres') || form.getValues('codeBarres') === '')) {
+        try {
+          const codeBarres = await generateAlphaNumericBarcode();
+          form.setValue('codeBarres', codeBarres);
+        } catch (error) {
+          console.error('Erreur lors de la génération du code-barres:', error);
+        }
+      }
+    };
+    
+    initializeBarcode();
+  }, [form, initialValues]);
 
   useEffect(() => {
     const loadSettings = async () => {
       if (user?.id) {
         try {
           const settings = await getSettings(user.id);
-          if (settings && settings.prix_matiere_premiere) {
-            // Si le prix matière a changé, mettre à jour le state
+          if (settings) {
+            // Mise à jour du prix de la matière première
             if (prixMatierePremiere !== settings.prix_matiere_premiere) {
               setPrixMatierePremiere(settings.prix_matiere_premiere);
+            }
+            
+            // Mise à jour du prix du façonnage par gramme
+            if (prixFaconnageParGramme !== settings.prix_faconnage_par_gramme) {
+              setPrixFaconnageParGramme(settings.prix_faconnage_par_gramme);
+            }
+            
+            // Si le formulaire a déjà un poids, recalculer les prix automatiquement
+            const poids = form.watch('poids');
+            if (poids) {
+              // Calcul du prix de la matière première
+              const nouveauPrixMatiere = poids * settings.prix_matiere_premiere;
+              setPrixCalcule(nouveauPrixMatiere);
+              form.setValue('prixAchat', nouveauPrixMatiere);
+              form.setValue('prixMatierePremiere', nouveauPrixMatiere);
               
-              // Si le formulaire a déjà un poids, recalculer le prix automatiquement
-              const poids = form.watch('poids');
-              if (poids) {
-                const nouveauPrixMatiere = poids * settings.prix_matiere_premiere;
-                setPrixCalcule(nouveauPrixMatiere);
-                
-                // Met à jour le prix d'achat avec le prix de la matière première calculé
-                form.setValue('prixAchat', nouveauPrixMatiere);
-                form.setValue('prixMatierePremiere', nouveauPrixMatiere);
-                
-                // Mise à jour du prix de revient = matière + façonnage
-                const nouveauPrixRevient = nouveauPrixMatiere + faconnage;
-                setPrixDeRevient(nouveauPrixRevient);
-                
-                // Mise à jour du prix de vente final = matière + façonnage + marge
-                const nouveauPrixVente = nouveauPrixMatiere + faconnage + marge;
-                setPrixVenteFinal(nouveauPrixVente);
-                form.setValue('prixVente', nouveauPrixVente);
-              }
+              // Calcul du prix du façonnage
+              const nouveauPrixFaconnage = poids * settings.prix_faconnage_par_gramme;
+              setFaconnage(nouveauPrixFaconnage);
+              form.setValue('prixFaconnage', nouveauPrixFaconnage);
+              
+              // Mise à jour du prix de revient = matière + façonnage
+              const nouveauPrixRevient = nouveauPrixMatiere + nouveauPrixFaconnage;
+              setPrixDeRevient(nouveauPrixRevient);
+              
+              // Mise à jour du prix de vente final = matière + façonnage + marge
+              const nouveauPrixVente = nouveauPrixMatiere + nouveauPrixFaconnage + marge;
+              setPrixVenteFinal(nouveauPrixVente);
+              form.setValue('prixVente', nouveauPrixVente);
             }
           }
         } catch (error) {
@@ -177,7 +175,37 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
     
     // Nettoyer l'intervalle lors du démontage du composant
     return () => clearInterval(interval);
-  }, [user, form, prixMatierePremiere, faconnage, marge]);
+  }, [user, form, prixMatierePremiere, prixFaconnageParGramme, marge]);
+
+  // Mise à jour du prix calculé basé sur le poids
+  useEffect(() => {
+    const poids = form.watch('poids');
+    if (poids) {
+      // Calcul du prix de la matière première
+      if (prixMatierePremiere) {
+        const nouveauPrixMatiere = poids * prixMatierePremiere;
+        setPrixCalcule(nouveauPrixMatiere);
+        form.setValue('prixAchat', nouveauPrixMatiere);
+        form.setValue('prixMatierePremiere', nouveauPrixMatiere);
+      }
+      
+      // Calcul du prix du façonnage
+      if (prixFaconnageParGramme) {
+        const nouveauPrixFaconnage = poids * prixFaconnageParGramme;
+        setFaconnage(nouveauPrixFaconnage);
+        form.setValue('prixFaconnage', nouveauPrixFaconnage);
+      }
+      
+      // Mise à jour du prix de revient = matière + façonnage
+      const nouveauPrixRevient = prixCalcule + faconnage;
+      setPrixDeRevient(nouveauPrixRevient);
+      
+      // Mise à jour du prix de vente final = prix de revient + marge
+      const nouveauPrixVente = prixCalcule + faconnage + marge;
+      setPrixVenteFinal(nouveauPrixVente);
+      form.setValue('prixVente', nouveauPrixVente);
+    }
+  }, [form.watch('poids'), prixMatierePremiere, prixFaconnageParGramme, prixCalcule, faconnage, marge, form]);
 
   // Calcul du prix minimum de vente lorsque le prix de vente change
   useEffect(() => {
@@ -222,16 +250,19 @@ const ProduitFormWithTeam = ({ onSubmit, initialValues, categories, depots }: Pr
       form.setValue('prixAchat', nouveauPrixMatiere);
       form.setValue('prixMatierePremiere', nouveauPrixMatiere);
       
+      // Calcul automatique du façonnage
+      const nouveauPrixFaconnage = poids * prixFaconnageParGramme;
+      setFaconnage(nouveauPrixFaconnage);
+      form.setValue('prixFaconnage', nouveauPrixFaconnage);
+      
       // Mise à jour du prix de revient = matière + façonnage
-      const nouveauPrixRevient = nouveauPrixMatiere + faconnage;
+      const nouveauPrixRevient = nouveauPrixMatiere + nouveauPrixFaconnage;
       setPrixDeRevient(nouveauPrixRevient);
       
       // Mise à jour du prix de vente final = matière + façonnage + marge
-      const nouveauPrixVente = nouveauPrixMatiere + faconnage + marge;
+      const nouveauPrixVente = nouveauPrixMatiere + nouveauPrixFaconnage + marge;
       setPrixVenteFinal(nouveauPrixVente);
       form.setValue('prixVente', nouveauPrixVente);
-      
-      // On ne met plus à jour automatiquement le prix minimum de vente
       
       return nouveauPrixMatiere;
     }

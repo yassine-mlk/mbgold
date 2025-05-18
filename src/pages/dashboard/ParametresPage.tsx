@@ -14,6 +14,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Depot, Category, getDepots, getCategories, createDepot, createCategory, updateDepot, updateCategory, deleteDepot, deleteCategory, getSettings, updateSettings } from '@/services/supabase/parametres';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/contexts/AuthContext';
 
 const ParametresPage = () => {
   // État pour les dépôts
@@ -45,7 +46,8 @@ const ParametresPage = () => {
     deleteItem: false,
     updateLogo: false,
     updateBusinessName: false,
-    updatePrixMatiere: false
+    updatePrixMatiere: false,
+    updatePrixFaconnage: false
   });
   
   // Contexte du thème
@@ -55,12 +57,18 @@ const ParametresPage = () => {
   const [logoPreview, setLogoPreview] = useState<string | null>(logo);
   const [newBusinessName, setNewBusinessName] = useState(businessName);
   const [prixMatierePremiere, setPrixMatierePremiere] = useState<number>(0);
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  
+  const [prixFaconnageParGramme, setPrixFaconnageParGramme] = useState<number>(0);
+  const { user } = useAuth();
+
   // Chargement initial des données
   useEffect(() => {
     const loadData = async () => {
-      setIsLoading(prev => ({ ...prev, depots: true, categories: true }));
+      setIsLoading(prev => ({ 
+        ...prev, 
+        categories: true, 
+        depots: true, 
+        settings: true 
+      }));
       
       try {
         const depotsData = await getDepots();
@@ -68,38 +76,28 @@ const ParametresPage = () => {
         
         setDepots(depotsData);
         setCategories(categoriesData);
+
+        // Charger les paramètres
+        if (user?.id) {
+          const settings = await getSettings(user.id);
+          if (settings) {
+            setBusinessName(settings.business_name || '');
+            setAccentColor(settings.accent_color || 'blue');
+            setTheme(settings.theme === 'dark' ? 'dark' : 'light');
+            setPrixMatierePremiere(settings.prix_matiere_premiere || 0);
+            setPrixFaconnageParGramme(settings.prix_faconnage_par_gramme || 0);
+          }
+        }
       } catch (error) {
         console.error('Erreur lors du chargement des données:', error);
         toast.error("Erreur lors du chargement des données");
       } finally {
-        setIsLoading(prev => ({ ...prev, depots: false, categories: false }));
+        setIsLoading(prev => ({ ...prev, depots: false, categories: false, settings: false }));
       }
     };
     
     loadData();
-  }, []);
-  
-  // Vérifier l'utilisateur actuel
-  useEffect(() => {
-    const checkUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      setCurrentUser(user);
-
-      // Charger le prix de la matière première si l'utilisateur est connecté
-      if (user) {
-        try {
-          const settings = await getSettings(user.id);
-          if (settings && settings.prix_matiere_premiere !== undefined) {
-            setPrixMatierePremiere(settings.prix_matiere_premiere);
-          }
-        } catch (error) {
-          console.error("Erreur lors du chargement du prix de la matière première:", error);
-        }
-      }
-    };
-    
-    checkUser();
-  }, []);
+  }, [user]);
   
   // Mise à jour de l'aperçu du logo lorsque le logo change
   useEffect(() => {
@@ -342,7 +340,7 @@ const ParametresPage = () => {
   };
 
   const handlePrixMatiereChange = async () => {
-    if (!currentUser) {
+    if (!user) {
       toast.error("Vous devez être connecté pour modifier ce paramètre");
       return;
     }
@@ -351,7 +349,7 @@ const ParametresPage = () => {
     
     try {
       // Mise à jour du prix de la matière première dans les paramètres
-      await updateSettings(currentUser.id, { prix_matiere_premiere: prixMatierePremiere });
+      await updateSettings(user.id, { prix_matiere_premiere: prixMatierePremiere });
       
       // Récupérer tous les produits
       const { data: produits, error: produitsError } = await supabase
@@ -369,18 +367,26 @@ const ParametresPage = () => {
           // Calculer le nouveau prix d'achat basé sur le poids
           const nouveauPrixAchat = produit.poids * prixMatierePremiere;
           
-          // Calculer le façonnage actuel (différence entre prix de vente et prix d'achat)
-          const faconnageActuel = produit.prixvente - produit.prixachat;
+          // Calculer la différence actuelle entre le prix de vente et le prix minimum
+          const differenceActuelle = produit.prixvente - produit.prixminimumvente;
           
-          // Calculer le nouveau prix de vente (nouveau prix d'achat + façonnage actuel)
-          const nouveauPrixVente = nouveauPrixAchat + faconnageActuel;
+          // Calculer le façonnage et la marge actuels
+          const faconnageEtMargeActuels = produit.prixvente - produit.prixachat;
+          
+          // Calculer le nouveau prix de vente (nouveau prix d'achat + façonnage et marge actuels)
+          const nouveauPrixVente = nouveauPrixAchat + faconnageEtMargeActuels;
+          
+          // Calculer le nouveau prix minimum de vente en conservant la même différence
+          const nouveauPrixMinimumVente = Math.max(0, nouveauPrixVente - differenceActuelle);
           
           // Mettre à jour le produit
           const { error: updateError } = await supabase
             .from('produits')
             .update({
               prixachat: nouveauPrixAchat,
-              prixvente: nouveauPrixVente
+              prixvente: nouveauPrixVente,
+              prixmatierepremiere: nouveauPrixAchat,
+              prixminimumvente: nouveauPrixMinimumVente
             })
             .eq('id', produit.id);
           
@@ -398,6 +404,63 @@ const ParametresPage = () => {
       toast.error("Erreur lors de la mise à jour du prix de la matière première");
     } finally {
       setIsLoading(prev => ({ ...prev, updatePrixMatiere: false }));
+    }
+  };
+
+  const handlePrixFaconnageChange = async () => {
+    if (!user) {
+      toast.error("Vous devez être connecté pour modifier ce paramètre");
+      return;
+    }
+    
+    setIsLoading(prev => ({ ...prev, updatePrixFaconnage: true }));
+    
+    try {
+      // Mise à jour du prix du façonnage dans les paramètres
+      await updateSettings(user.id, { prix_faconnage_par_gramme: prixFaconnageParGramme });
+      
+      // Récupérer tous les produits
+      const { data: produits, error: produitsError } = await supabase
+        .from('produits')
+        .select('*')
+        .not('poids', 'eq', 0);
+      
+      if (produitsError) throw produitsError;
+      
+      if (produits && produits.length > 0) {
+        // Pour chaque produit, mettre à jour son prix de façonnage et son prix de vente
+        let updatedCount = 0;
+        
+        for (const produit of produits) {
+          // Calculer le nouveau prix de façonnage basé sur le poids
+          const nouveauPrixFaconnage = produit.poids * prixFaconnageParGramme;
+          
+          // Calculer le nouveau prix de vente (matière + nouveau façonnage + marge actuelle)
+          const nouveauPrixVente = produit.prixmatierepremiere + nouveauPrixFaconnage + produit.marge;
+          
+          // Mettre à jour le produit
+          const { error: updateError } = await supabase
+            .from('produits')
+            .update({
+              prixfaconnage: nouveauPrixFaconnage,
+              prixvente: nouveauPrixVente
+            })
+            .eq('id', produit.id);
+          
+          if (!updateError) {
+            updatedCount++;
+          }
+        }
+        
+        toast.success(`Prix du façonnage mis à jour et ${updatedCount} produits recalculés`);
+      } else {
+        toast.success("Prix du façonnage mis à jour");
+      }
+    } catch (error) {
+      console.error("Erreur lors de la mise à jour du prix du façonnage:", error);
+      toast.error("Erreur lors de la mise à jour du prix du façonnage");
+    } finally {
+      setIsLoading(prev => ({ ...prev, updatePrixFaconnage: false }));
     }
   };
 
@@ -625,6 +688,41 @@ const ParametresPage = () => {
                       disabled={isLoading.updatePrixMatiere}
                     >
                       {isLoading.updatePrixMatiere ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : null}
+                      Enregistrer
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            
+            {/* Prix du façonnage */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Prix du façonnage</CardTitle>
+                <CardDescription>
+                  Configurez le prix du façonnage par gramme pour calculer automatiquement le coût de main d'œuvre
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  <Label htmlFor="prix-faconnage">Prix du façonnage par gramme (DH/g)</Label>
+                  <div className="flex space-x-2">
+                    <Input 
+                      id="prix-faconnage" 
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={prixFaconnageParGramme}
+                      onChange={(e) => setPrixFaconnageParGramme(parseFloat(e.target.value) || 0)}
+                      placeholder="Prix du façonnage par gramme"
+                    />
+                    <Button 
+                      onClick={handlePrixFaconnageChange}
+                      disabled={isLoading.updatePrixFaconnage}
+                    >
+                      {isLoading.updatePrixFaconnage ? (
                         <Loader2 className="h-4 w-4 animate-spin mr-2" />
                       ) : null}
                       Enregistrer

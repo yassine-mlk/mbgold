@@ -25,6 +25,7 @@ export interface Settings {
   business_name: string;
   logo_url?: string;
   prix_matiere_premiere: number;
+  prix_faconnage_par_gramme: number;
   created_at?: string;
   updated_at?: string;
 }
@@ -214,7 +215,8 @@ export const getSettings = async (userId: string): Promise<Settings | null> => {
           theme: 'light',
           accent_color: 'blue',
           business_name: 'Temps d\'Or',
-          prix_matiere_premiere: 0.00
+          prix_matiere_premiere: 0.00,
+          prix_faconnage_par_gramme: 0.00
         });
       }
       throw error;

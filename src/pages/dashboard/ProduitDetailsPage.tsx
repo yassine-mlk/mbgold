@@ -26,32 +26,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { toast } from '@/components/ui/sonner';
 import BarcodeDisplay from '@/components/stock/BarcodeDisplay';
 import ProduitFormWithTeam from '@/components/stock/ProduitFormWithTeam';
-import { getProduitById, updateProduit, deleteProduit } from '@/services/supabase/stock';
+import { getProduitById, updateProduit, deleteProduit, Produit } from '@/services/supabase/stock';
 import { getDepots, getCategories, Category, Depot, getSettings, updateSettings } from '@/services/supabase/parametres';
 import { getTeamMembers, TeamMember } from '@/services/supabase/team';
 import { useAuth } from '@/contexts/AuthContext';
 
-export interface Produit {
-  id: string;
-  nom: string;
-  description: string;
-  reference: string;
-  codeBarres: string;
-  prixAchat: number;
-  prixVente: number;
-  prixMatierePremiere: number;
-  prixFaconnage: number;
-  marge: number;
-  quantite: number;
-  poids: number;
-  categorieId: string;
-  depotId: string;
-  image: string;
-  compose?: boolean;
-  composants?: {
-    produitId: string;
-    quantite: number;
-  }[];
+// Import both ImageUploaders
+import ImageUploader from '@/components/stock/ImageUploader';
+import DirectImageUploader from '@/components/stock/DirectImageUploader';
+
+// Interface étendue pour les données additionnelles spécifiques à la page de détails
+interface ProduitWithExtras extends Produit {
   teamMemberId?: string;
   promotion?: {
     id: string;
@@ -63,17 +48,21 @@ export interface Produit {
   };
 }
 
+// Feature flag for using direct image uploader
+const USE_DIRECT_UPLOADER = true; // Set to true to use DirectImageUploader
+
 const ProduitDetailsPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
   
-  const [produit, setProduit] = useState<Produit | null>(null);
+  const [produit, setProduit] = useState<ProduitWithExtras | null>(null);
   const [produits, setProduits] = useState<Produit[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [depots, setDepots] = useState<Depot[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [prixMatierePremiere, setPrixMatierePremiere] = useState(0);
+  const [prixMatierePremiere, setPrixMatierePremiere] = useState<number>(0);
+  const [prixFaconnageParGramme, setPrixFaconnageParGramme] = useState<number>(0);
   const [isUpdatingPrix, setIsUpdatingPrix] = useState(false);
   const [prixMisAJour, setPrixMisAJour] = useState(false);
   const [isLoading, setIsLoading] = useState({
@@ -101,7 +90,7 @@ const ProduitDetailsPage = () => {
         // S'assurer que tous les champs obligatoires sont présents
         if (produitData) {
           // Valeurs par défaut pour les nouveaux champs s'ils n'existent pas
-          const produitWithDefaults: Produit = {
+          const produitWithDefaults: ProduitWithExtras = {
             ...produitData,
             prixMatierePremiere: produitData.prixMatierePremiere || produitData.prixAchat || 0,
             prixFaconnage: produitData.prixFaconnage || 0,
@@ -116,6 +105,7 @@ const ProduitDetailsPage = () => {
           const settings = await getSettings(user.id);
           if (settings) {
             setPrixMatierePremiere(settings.prix_matiere_premiere || 0);
+            setPrixFaconnageParGramme(settings.prix_faconnage_par_gramme || 0);
           }
         }
         
@@ -167,24 +157,40 @@ const ProduitDetailsPage = () => {
       const poids = produit.poids || 0;
       const nouveauPrixMatiere = poids * prixMatierePremiere;
       
-      // Conserver les valeurs existantes pour le façonnage et la marge
-      const faconnage = produit.prixFaconnage || 0;
+      // Calculer le nouveau prix du façonnage (poids × taux de façonnage par gramme)
+      const nouveauPrixFaconnage = poids * prixFaconnageParGramme;
+      
+      // Conserver la valeur existante pour la marge
       const marge = produit.marge || 0;
+      
+      // Calculer la différence actuelle entre le prix de vente et le prix minimum
+      const differenceActuelle = produit.prixVente - (produit.prixMinimumVente || 0);
+      
+      // Calculer le nouveau prix de vente
+      const nouveauPrixVente = nouveauPrixMatiere + nouveauPrixFaconnage + marge;
+      
+      // Calculer le nouveau prix minimum en maintenant la même différence
+      const nouveauPrixMinimumVente = Math.max(0, nouveauPrixVente - differenceActuelle);
       
       // Préparer les données de mise à jour
       const updatedData = {
         prixMatierePremiere: nouveauPrixMatiere,
         prixAchat: nouveauPrixMatiere,
-        prixVente: nouveauPrixMatiere + faconnage + marge
+        prixFaconnage: nouveauPrixFaconnage,
+        prixVente: nouveauPrixVente,
+        prixMinimumVente: nouveauPrixMinimumVente
       };
       
       console.log('Mise à jour automatique du prix:', {
         poids,
-        tauxParGramme: prixMatierePremiere,
+        tauxMatiere: prixMatierePremiere,
+        tauxFaconnage: prixFaconnageParGramme,
         nouveauPrixMatiere,
-        faconnage,
+        nouveauPrixFaconnage,
         marge,
-        prixVente: nouveauPrixMatiere + faconnage + marge
+        prixVente: nouveauPrixVente,
+        prixMinimumVente: nouveauPrixMinimumVente,
+        difference: differenceActuelle
       });
       
       // Mettre à jour le produit
@@ -206,22 +212,24 @@ const ProduitDetailsPage = () => {
     } finally {
       setIsUpdatingPrix(false);
     }
-  }, [produit, user, prixMatierePremiere]);
+  }, [produit, user, prixMatierePremiere, prixFaconnageParGramme]);
   
   // Effet pour mettre à jour automatiquement le prix quand le produit est chargé
   useEffect(() => {
-    if (produit && prixMatierePremiere > 0 && !isLoading.produit) {
+    if (produit && (prixMatierePremiere > 0 || prixFaconnageParGramme > 0) && !isLoading.produit) {
       // Vérifier si le prix affiché correspond au prix théorique actuel
-      const prixTheorique = produit.poids * prixMatierePremiere;
-      const prixEnregistre = produit.prixMatierePremiere || 0;
-      const prixDifferent = Math.abs(prixTheorique - prixEnregistre) > 0.01; // Différence de plus de 1 centime
+      const prixTheoriqueMatiere = produit.poids * prixMatierePremiere;
+      const prixTheoriqueFaconnage = produit.poids * prixFaconnageParGramme;
       
-      // Si prix différent, actualiser automatiquement
-      if (prixDifferent && !isUpdatingPrix && !prixMisAJour) {
+      const prixMatiereDifferent = Math.abs(prixTheoriqueMatiere - (produit.prixMatierePremiere || 0)) > 0.01;
+      const prixFaconnageDifferent = Math.abs(prixTheoriqueFaconnage - (produit.prixFaconnage || 0)) > 0.01;
+      
+      // Si un des prix est différent, actualiser automatiquement
+      if ((prixMatiereDifferent || prixFaconnageDifferent) && !isUpdatingPrix && !prixMisAJour) {
         recalculerPrixAutomatique();
       }
     }
-  }, [produit, prixMatierePremiere, isLoading.produit, isUpdatingPrix, prixMisAJour, recalculerPrixAutomatique]);
+  }, [produit, prixMatierePremiere, prixFaconnageParGramme, isLoading.produit, isUpdatingPrix, prixMisAJour, recalculerPrixAutomatique]);
   
   // Une fonction temporaire pour obtenir tous les produits
   // À remplacer par une vraie fonction si nécessaire
@@ -259,7 +267,7 @@ const ProduitDetailsPage = () => {
     return new Date(dateDebut) <= now && new Date(dateFin) >= now;
   };
   
-  const handleEditProduit = async (produitData: Omit<Produit, 'id' | 'reference'>) => {
+  const handleEditProduit = async (produitData: Omit<ProduitWithExtras, 'id' | 'reference'>) => {
     if (!produit) return;
     
     setIsLoading(prev => ({ ...prev, edit: true }));
@@ -269,7 +277,7 @@ const ProduitDetailsPage = () => {
       
       if (updatedProduit) {
         // S'assurer que tous les champs nécessaires sont présents
-        const updatedProduitWithDefaults: Produit = {
+        const updatedProduitWithDefaults: ProduitWithExtras = {
           ...updatedProduit,
           prixMatierePremiere: updatedProduit.prixMatierePremiere || updatedProduit.prixAchat || 0,
           prixFaconnage: updatedProduit.prixFaconnage || 0,
@@ -420,6 +428,11 @@ const ProduitDetailsPage = () => {
               <div className="flex justify-between items-center">
                 <span className="text-sm font-medium">Prix d'achat:</span>
                 <span>{produit.prixAchat.toFixed(2)} DH</span>
+              </div>
+              
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium">Prix minimum de vente:</span>
+                <span className="text-orange-600 font-medium">{produit.prixMinimumVente.toFixed(2)} DH</span>
               </div>
               
               <div className="flex justify-between items-center">
@@ -740,6 +753,8 @@ const ProduitDetailsPage = () => {
             barcode={produit.codeBarres}
             productName={produit.nom}
             price={produit.prixVente}
+            weight={produit.poids}
+            category={categories.find(c => c.id === produit.categorieId)?.nom}
           />
           
           <DialogFooter className="mt-4">
