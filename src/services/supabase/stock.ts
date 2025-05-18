@@ -587,6 +587,12 @@ export const captureAndUploadProductImage = async (productId: string, imageBlob:
  */
 export const isBarCodeUnique = async (barcode: string): Promise<boolean> => {
   try {
+    // Valider que le code-barres est au format attendu (une lettre majuscule suivie de 3 chiffres)
+    if (!barcode || !/^[A-Z][0-9]{3}$/.test(barcode)) {
+      console.error('Format de code-barres invalide:', barcode);
+      return false;
+    }
+
     const { data, error } = await supabase
       .from('produits')
       .select('id')
@@ -607,7 +613,7 @@ export const isBarCodeUnique = async (barcode: string): Promise<boolean> => {
 };
 
 /**
- * Génère un code-barres alphanumérique unique au format Code 128
+ * Génère un code-barres unique au format (A-Z)123
  */
 export const generateUniqueBarcode = async (): Promise<string> => {
   let isUnique = false;
@@ -615,23 +621,100 @@ export const generateUniqueBarcode = async (): Promise<string> => {
   
   // Essaie jusqu'à 10 fois de générer un code-barres unique
   for (let attempt = 0; attempt < 10; attempt++) {
-    // Utiliser un format alphanumérique: RF suivi de 5 chiffres
-    const prefix = 'RF';
-    const randomNumber = Math.floor(Math.random() * 100000).toString().padStart(5, '0');
-    barcode = `${prefix}${randomNumber}`;
+    // Génération du code-barres au format (A-Z)123
+    barcode = await generateAlphaNumericBarcode();
+    
+    // Vérifier que le format est correct
+    if (!barcode || !/^[A-Z][0-9]{3}$/.test(barcode)) {
+      console.error(`Format de code-barres invalide généré: ${barcode}, utilisation du format par défaut A001`);
+      barcode = 'A001';
+    }
     
     // Vérifier si ce code-barres est unique
     isUnique = await isBarCodeUnique(barcode);
     if (isUnique) {
       break;
     }
+    
+    console.log(`Le code-barres ${barcode} existe déjà, tentative ${attempt+1}/10`);
   }
   
   if (!isUnique) {
     console.warn('Impossible de générer un code-barres unique après plusieurs tentatives');
+    // Générer un code de secours tout en respectant le format A001-Z999
+    // On utilise un nombre aléatoire entre 1 et 999 pour les chiffres
+    const randomNum = Math.floor(Math.random() * 999) + 1;
+    // On utilise une lettre aléatoire de A à Z pour la lettre
+    const letter = String.fromCharCode(65 + (Math.floor(Math.random() * 26)));
+    barcode = letter + randomNum.toString().padStart(3, '0');
+    console.log(`Génération d'un code-barres de secours: ${barcode}`);
   }
   
   return barcode;
+};
+
+/**
+ * Génère un code-barres au format (A-Z)123
+ * Une lettre majuscule suivie de 3 chiffres
+ */
+export const generateAlphaNumericBarcode = async (): Promise<string> => {
+  try {
+    // Rechercher tous les codes-barres existants qui suivent notre format A000
+    const { data, error } = await supabase
+      .from('produits')
+      .select('codebarres')
+      .order('codebarres', { ascending: true });
+    
+    if (error) {
+      console.error('Erreur lors de la recherche des codes-barres:', error);
+      return 'A001'; // En cas d'erreur, commencer à A001
+    }
+    
+    // Filtrer uniquement les codes au format A000 (une lettre suivie de 3 chiffres)
+    const validBarcodes = data
+      .map(item => item.codebarres || '')
+      .filter(code => /^[A-Z][0-9]{3}$/.test(code));
+    
+    console.log("Codes-barres existants au format attendu:", validBarcodes);
+    
+    // Si aucun code valide n'existe, commencer par A001
+    if (validBarcodes.length === 0) {
+      return 'A001';
+    }
+    
+    // Trier les codes par ordre alphabétique
+    validBarcodes.sort();
+    
+    // Prendre le dernier code
+    const lastBarcode = validBarcodes[validBarcodes.length - 1];
+    console.log("Dernier code-barres utilisé:", lastBarcode);
+    
+    // Extraire la lettre et le numéro
+    const letter = lastBarcode.charAt(0);
+    const number = parseInt(lastBarcode.substring(1));
+    
+    // Incrémenter le numéro
+    if (number < 999) {
+      // Si numéro < 999, simplement incrémenter
+      const newCode = letter + (number + 1).toString().padStart(3, '0');
+      console.log("Nouveau code-barres généré:", newCode);
+      return newCode;
+    } else {
+      // Si numéro = 999, passer à la lettre suivante
+      const nextLetter = String.fromCharCode(letter.charCodeAt(0) + 1);
+      // Si on dépasse Z, revenir à A001
+      if (nextLetter > 'Z') {
+        console.warn("Toutes les combinaisons de codes-barres (A001-Z999) ont été utilisées. Retour à A001.");
+        return 'A001';
+      }
+      const newCode = nextLetter + '001';
+      console.log("Nouveau code-barres généré (nouvelle lettre):", newCode);
+      return newCode;
+    }
+  } catch (error) {
+    console.error('Erreur lors de la génération du code-barres:', error);
+    return 'A001';
+  }
 };
 
 /**
