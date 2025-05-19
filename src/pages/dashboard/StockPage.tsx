@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Filter, Edit, Trash2, Package, UserCircle, Percent, Combine, Barcode, Printer, Loader2 } from 'lucide-react';
+import { Plus, Search, Filter, Edit, Trash2, Package, UserCircle, Percent, Combine, Barcode, Printer, Loader2, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -91,6 +91,8 @@ const StockPage = () => {
     compose: false,
     promotion: false
   });
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const navigate = useNavigate();
 
   const loadProduitsData = useCallback(async () => {
@@ -155,8 +157,11 @@ const StockPage = () => {
   }, [produits]);
 
   const filteredProduits = produits.filter(produit => {
-    const matchesSearch = produit.nom.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      produit.reference.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = searchTerm ? 
+      produit.nom.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      produit.reference.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (produit.codeBarres && produit.codeBarres.toLowerCase().includes(searchTerm.toLowerCase())) :
+      true;
     const matchesCategorie = categorieFilter === 'all' ? true : produit.categorieId === categorieFilter;
     const matchesDepot = depotFilter === 'all' ? true : produit.depotId === depotFilter;
     const matchesCompose = activeTab === 'compositions' ? !!produit.compose : true;
@@ -170,6 +175,60 @@ const StockPage = () => {
       return matchesSearch && matchesCategorie && matchesDepot && matchesPromotion;
     }
   });
+
+  // Handling sort when column header is clicked
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      // If already sorting by this column, toggle direction
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      // Set new sort column and default to ascending
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
+  };
+
+  // Apply sorting to filtered products
+  const sortedProducts = [...filteredProduits].sort((a, b) => {
+    if (!sortColumn) return 0;
+
+    let valueA, valueB;
+
+    switch (sortColumn) {
+      case 'codeBarres':
+        valueA = a.codeBarres || '';
+        valueB = b.codeBarres || '';
+        break;
+      case 'reference':
+        valueA = a.reference || '';
+        valueB = b.reference || '';
+        break;
+      case 'poids':
+        valueA = a.poids || 0;
+        valueB = b.poids || 0;
+        break;
+      default:
+        return 0;
+    }
+
+    if (valueA === valueB) return 0;
+
+    const result = typeof valueA === 'string' 
+      ? valueA.localeCompare(valueB) 
+      : valueA - valueB;
+
+    return sortDirection === 'asc' ? result : -result;
+  });
+
+  // Function to render sort icon
+  const renderSortIcon = (column: string) => {
+    if (sortColumn !== column) {
+      return <ArrowUpDown className="ml-1 h-4 w-4" />;
+    }
+    return sortDirection === 'asc' 
+      ? <ArrowUp className="ml-1 h-4 w-4" />
+      : <ArrowDown className="ml-1 h-4 w-4" />;
+  };
 
   const getCategoryName = (categoryId: string) => {
     const category = categories.find(c => c.id === categoryId);
@@ -500,7 +559,7 @@ const StockPage = () => {
       }}>
         <div className="flex flex-wrap justify-between items-center">
           <TabsList>
-            <TabsTrigger value="produits">Produits</TabsTrigger>
+            <TabsTrigger value="produits">Bijoux Standard</TabsTrigger>
             <TabsTrigger value="compositions">Compositions</TabsTrigger>
             <TabsTrigger value="promotions">Promotions</TabsTrigger>
           </TabsList>
@@ -601,20 +660,38 @@ const StockPage = () => {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Référence</TableHead>
-                      <TableHead>Code-barres</TableHead>
+                      <TableHead 
+                        className="cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() => handleSort('reference')}
+                      >
+                        Référence
+                        {renderSortIcon('reference')}
+                      </TableHead>
+                      <TableHead 
+                        className="cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() => handleSort('codeBarres')}
+                      >
+                        Code-barres
+                        {renderSortIcon('codeBarres')}
+                      </TableHead>
                       <TableHead>Produit</TableHead>
                       <TableHead>Catégorie</TableHead>
                       <TableHead className="hidden md:table-cell">Dépôt</TableHead>
-                      <TableHead className="hidden lg:table-cell">Assigné à</TableHead>
+                      <TableHead 
+                        className="hidden lg:table-cell cursor-pointer hover:bg-muted/50 transition-colors"
+                        onClick={() => handleSort('poids')}
+                      >
+                        Poids
+                        {renderSortIcon('poids')}
+                      </TableHead>
                       <TableHead className="text-right">Prix Vente</TableHead>
                       <TableHead className="text-right">Stock</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredProduits.length > 0 ? (
-                      filteredProduits.map((produit) => {
+                    {sortedProducts.length > 0 ? (
+                      sortedProducts.map((produit) => {
                         const member = teamMembers.find(m => m.id === produit.teamMemberId);
                         return (
                           <TableRow key={produit.id}>
@@ -624,16 +701,7 @@ const StockPage = () => {
                             <TableCell>{getCategoryName(produit.categorieId)}</TableCell>
                             <TableCell className="hidden md:table-cell">{getDepotName(produit.depotId)}</TableCell>
                             <TableCell className="hidden lg:table-cell">
-                              {member ? (
-                                <div className="flex items-center gap-2">
-                                  <Avatar className="h-6 w-6">
-                                    <AvatarFallback>{getMemberInitials(member.nom)}</AvatarFallback>
-                                  </Avatar>
-                                  <span>{member.nom}</span>
-                                </div>
-                              ) : (
-                                <span className="text-muted-foreground">Non assigné</span>
-                              )}
+                              {produit.poids ? `${produit.poids} g` : '-'}
                             </TableCell>
                             <TableCell className="text-right">
                               <div className="flex flex-col items-end">
@@ -662,6 +730,13 @@ const StockPage = () => {
                             </TableCell>
                             <TableCell className="text-right">
                               <div className="flex justify-end gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => navigate(`/dashboard/stock/produit/${produit.id}`)}
+                                >
+                                  <Package className="h-4 w-4 text-blue-500" />
+                                </Button>
                                 <Button
                                   variant="ghost"
                                   size="icon"
@@ -720,8 +795,8 @@ const StockPage = () => {
             </Card>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-              {filteredProduits.length > 0 ? (
-                filteredProduits.map((produit) => (
+              {sortedProducts.length > 0 ? (
+                sortedProducts.map((produit) => (
                   <Card key={produit.id} className="overflow-hidden flex flex-col h-full">
                     <div className="relative aspect-square overflow-hidden cursor-pointer" onClick={() => navigate(`/dashboard/stock/produit/${produit.id}`)}>
                       {produit.image ? (
@@ -845,8 +920,8 @@ const StockPage = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredProduits.length > 0 ? (
-                      filteredProduits.map((produit) => (
+                    {sortedProducts.length > 0 ? (
+                      sortedProducts.map((produit) => (
                         <TableRow key={produit.id}>
                           <TableCell className="font-mono text-xs">{produit.reference}</TableCell>
                           <TableCell className="font-medium">{produit.nom}</TableCell>
@@ -936,8 +1011,8 @@ const StockPage = () => {
             </Card>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-              {filteredProduits.length > 0 ? (
-                filteredProduits.map((produit) => (
+              {sortedProducts.length > 0 ? (
+                sortedProducts.map((produit) => (
                   <Card key={produit.id} className="overflow-hidden flex flex-col h-full">
                     <div className="relative aspect-square overflow-hidden cursor-pointer" onClick={() => navigate(`/dashboard/stock/produit/${produit.id}`)}>
                       {produit.image ? (
@@ -1024,8 +1099,8 @@ const StockPage = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredProduits.length > 0 ? (
-                      filteredProduits
+                    {sortedProducts.length > 0 ? (
+                      sortedProducts
                         .filter(p => p.promotion)
                         .map((produit) => {
                           const promotion = produit.promotion!;
@@ -1101,8 +1176,8 @@ const StockPage = () => {
             </Card>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-              {filteredProduits.length > 0 ? (
-                filteredProduits
+              {sortedProducts.length > 0 ? (
+                sortedProducts
                   .filter(produit => produit.promotion)
                   .map((produit) => {
                     const promotion = produit.promotion!;
